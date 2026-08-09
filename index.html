@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Text-to-Video Studio</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background: #090d16; color: #f1f5f9; padding: 15px; display: flex; justify-content: center; }
+        
+        .app-card { width: 100%; max-width: 480px; background: #131c2e; padding: 20px; border-radius: 16px; border: 1px solid #1e293b; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        
+        h1 { font-size: 20px; color: #38bdf8; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+        p.subtitle { font-size: 12px; color: #94a3b8; margin-bottom: 20px; }
+
+        label { display: block; font-size: 12px; font-weight: 600; color: #cbd5e1; margin-bottom: 6px; }
+        
+        textarea { width: 100%; height: 110px; background: #090d16; border: 1px solid #334155; border-radius: 10px; padding: 12px; color: #fff; font-size: 14px; resize: none; outline: none; margin-bottom: 16px; }
+        textarea:focus { border-color: #38bdf8; }
+
+        .control-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        
+        select { width: 100%; background: #090d16; border: 1px solid #334155; border-radius: 8px; padding: 10px; color: #fff; font-size: 13px; outline: none; }
+
+        .btn-submit { width: 100%; padding: 14px; background: linear-gradient(135deg, #2563eb, #7c3aed); border: none; border-radius: 10px; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+        .btn-submit:disabled { background: #475569; cursor: not-allowed; }
+
+        /* Loader & Status */
+        .status-box { margin-top: 15px; padding: 12px; border-radius: 8px; font-size: 13px; text-align: center; display: none; }
+        .status-box.info { background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); }
+        .status-box.error { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2); }
+
+        .loader { display: inline-block; width: 14px; height: 14px; border: 2px solid #38bdf8; border-radius: 50%; border-top-color: transparent; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Output Container */
+        .output-box { margin-top: 20px; display: none; }
+        
+        .video-wrapper { width: 100%; border-radius: 12px; overflow: hidden; background: #000; border: 1px solid #334155; }
+        video { width: 100%; display: block; max-height: 500px; object-fit: contain; }
+
+        .btn-download { display: block; width: 100%; margin-top: 12px; padding: 12px; background: #10b981; color: white; text-align: center; text-decoration: none; border-radius: 8px; font-size: 14px; font-weight: 600; }
+    </style>
+</head>
+<body>
+
+    <div class="app-card">
+        <h1>🎬 Shorts AI Video Creator</h1>
+        <p class="subtitle">Powered by Vidu Text-to-Video Engine</p>
+
+        <label for="prompt">Video Prompt</label>
+        <textarea id="prompt" placeholder="A cinematic drone shot of a futuristic cyberpunk city with flying cars in night rain..."></textarea>
+
+        <div class="control-grid">
+            <div>
+                <label>Aspect Ratio</label>
+                <select id="aspect_ratio">
+                    <option value="9:16" selected>9:16 (Shorts)</option>
+                    <option value="16:9">16:9 (Landscape)</option>
+                    <option value="1:1">1:1 (Square)</option>
+                </select>
+            </div>
+            <div>
+                <label>Duration</label>
+                <select id="duration">
+                    <option value="5" selected>5s</option>
+                    <option value="8">8s</option>
+                    <option value="10">10s</option>
+                </select>
+            </div>
+            <div>
+                <label>Quality</label>
+                <select id="resolution">
+                    <option value="540p">540p</option>
+                    <option value="720p" selected>720p</option>
+                    <option value="1080p">1080p</option>
+                </select>
+            </div>
+        </div>
+
+        <button id="genBtn" class="btn-submit" onclick="startGeneration()">Generate Video</button>
+
+        <div id="statusBox" class="status-box"></div>
+
+        <div id="outputBox" class="output-box">
+            <div class="video-wrapper">
+                <video id="videoPlayer" controls autoplay loop playsinline></video>
+            </div>
+            <a id="downloadBtn" class="btn-download" download="ai-generated-video.mp4" target="_blank">📥 Download Video</a>
+        </div>
+    </div>
+
+    <script>
+        // Set Backend Server Base URL (Relative path if hosted together, or full API URL)
+        const BACKEND_URL = ""; 
+
+        let pollInterval = null;
+
+        async function startGeneration() {
+            const prompt = document.getElementById('prompt').value.trim();
+            const aspect_ratio = document.getElementById('aspect_ratio').value;
+            const duration = document.getElementById('duration').value;
+            const resolution = document.getElementById('resolution').value;
+
+            const genBtn = document.getElementById('genBtn');
+            const statusBox = document.getElementById('statusBox');
+            const outputBox = document.getElementById('outputBox');
+
+            if (!prompt) {
+                showStatus("Please enter a video prompt first.", "error");
+                return;
+            }
+
+            // Reset UI State
+            genBtn.disabled = true;
+            outputBox.style.display = "none";
+            showStatus('<span class="loader"></span>Submitting prompt to Vidu AI Engine...', "info");
+
+            try {
+                // 1. Submit Request to Backend
+                const response = await fetch(`${BACKEND_URL}/api/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt, aspect_ratio, duration, resolution })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Generation request failed");
+                }
+
+                const taskId = data.task_id;
+                showStatus(`<span class="loader"></span>Task created (ID: ${taskId}). Generating video...`, "info");
+
+                // 2. Poll Task Status
+                pollStatus(taskId);
+
+            } catch (err) {
+                showStatus(`❌ Error: ${err.message}`, "error");
+                genBtn.disabled = false;
+            }
+        }
+
+        function pollStatus(taskId) {
+            pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${BACKEND_URL}/api/status/${taskId}`);
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || "Status check failed");
+                    }
+
+                    const state = data.state;
+
+                    if (state === "created" || state === "queueing" || state === "processing") {
+                        showStatus(`<span class="loader"></span>Vidu AI Status: [${state.toUpperCase()}] Rendering frames...`, "info");
+                    } else if (state === "success") {
+                        clearInterval(pollInterval);
+                        showStatus("🎉 Video Generation Complete!", "info");
+                        displayVideo(data.video_url);
+                        document.getElementById('genBtn').disabled = false;
+                    } else if (state === "failed") {
+                        clearInterval(pollInterval);
+                        showStatus(`❌ Generation Failed: ${data.error_message || "Unknown Vidu error"}`, "error");
+                        document.getElementById('genBtn').disabled = false;
+                    }
+
+                } catch (err) {
+                    clearInterval(pollInterval);
+                    showStatus(`❌ Polling Error: ${err.message}`, "error");
+                    document.getElementById('genBtn').disabled = false;
+                }
+            }, 4000); // Poll every 4 seconds
+        }
+
+        function displayVideo(url) {
+            const outputBox = document.getElementById('outputBox');
+            const videoPlayer = document.getElementById('videoPlayer');
+            const downloadBtn = document.getElementById('downloadBtn');
+
+            videoPlayer.src = url;
+            downloadBtn.href = url;
+            outputBox.style.display = "block";
+            videoPlayer.load();
+        }
+
+        function showStatus(message, type) {
+            const statusBox = document.getElementById('statusBox');
+            statusBox.className = `status-box ${type}`;
+            statusBox.innerHTML = message;
+            statusBox.style.display = "block";
+        }
+    </script>
+</body>
+</html>
